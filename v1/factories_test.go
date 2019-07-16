@@ -13,7 +13,6 @@ import (
 
 	amqpbroker "github.com/RichardKnop/machinery/v1/brokers/amqp"
 	redisbroker "github.com/RichardKnop/machinery/v1/brokers/redis"
-	sqsbroker "github.com/RichardKnop/machinery/v1/brokers/sqs"
 
 	amqpbackend "github.com/RichardKnop/machinery/v1/backends/amqp"
 	memcachebackend "github.com/RichardKnop/machinery/v1/backends/memcache"
@@ -184,41 +183,6 @@ func TestBrokerFactory(t *testing.T) {
 		)
 	}
 
-	// 3) AWS SQS
-	cnf = config.Config{
-		Broker:       "https://sqs.us-east-2.amazonaws.com/123456789012",
-		DefaultQueue: "machinery_tasks",
-	}
-
-	actual, err = machinery.BrokerFactory(&cnf)
-	if assert.NoError(t, err) {
-		_, isAWSSQSBroker := actual.(*sqsbroker.Broker)
-		assert.True(
-			t,
-			isAWSSQSBroker,
-			"Broker should be instance of *brokers.AWSSQSBroker",
-		)
-	}
-
-	// 4) local SQS config should pass with special env variable
-	// AWS SQS Invalid SQS Check
-	cnf = config.Config{
-		Broker:       "http://localhost:5672/some-queue",
-		DefaultQueue: "machinery_tasks",
-	}
-
-	os.Setenv("DISABLE_STRICT_SQS_CHECK", "yes")
-	actual, err = machinery.BrokerFactory(&cnf)
-	if assert.NoError(t, err) {
-		_, isAWSSQSBroker := actual.(*sqsbroker.Broker)
-		assert.True(
-			t,
-			isAWSSQSBroker,
-			"Broker should be instance of *brokers.AWSSQSBroker",
-		)
-	}
-	os.Unsetenv("DISABLE_STRICT_SQS_CHECK")
-
 }
 
 func TestBrokerFactoryError(t *testing.T) {
@@ -234,31 +198,6 @@ func TestBrokerFactoryError(t *testing.T) {
 		assert.Equal(t, "Factory failed with broker URL: BOGUS", err.Error())
 	}
 
-	// AWS SQS Invalid SQS Check
-	cnf = config.Config{
-		Broker:       "http://localhost:5672/some-queue",
-		DefaultQueue: "machinery_tasks",
-	}
-
-	conn, err = machinery.BrokerFactory(&cnf)
-	if assert.Error(t, err) {
-		assert.Nil(t, conn)
-		assert.Equal(t, "Factory failed with broker URL: http://localhost:5672/some-queue", err.Error())
-	}
-
-	// Non-AWS SQS URL allowed but not invalid http ones
-	os.Setenv("DISABLE_STRICT_SQS_CHECK", "yes")
-	cnf = config.Config{
-		Broker:       "localhost:5672/some-queue",
-		DefaultQueue: "machinery_tasks",
-	}
-
-	conn, err = machinery.BrokerFactory(&cnf)
-	if assert.Error(t, err) {
-		assert.Nil(t, conn)
-		assert.Equal(t, "Factory failed with broker URL: localhost:5672/some-queue", err.Error())
-	}
-	os.Unsetenv("DISABLE_STRICT_SQS_CHECK")
 }
 
 func TestBackendFactory(t *testing.T) {

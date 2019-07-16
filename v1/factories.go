@@ -14,10 +14,8 @@ import (
 	eagerbroker "github.com/RichardKnop/machinery/v1/brokers/eager"
 	brokeriface "github.com/RichardKnop/machinery/v1/brokers/iface"
 	redisbroker "github.com/RichardKnop/machinery/v1/brokers/redis"
-	sqsbroker "github.com/RichardKnop/machinery/v1/brokers/sqs"
 
 	amqpbackend "github.com/RichardKnop/machinery/v1/backends/amqp"
-	dynamobackend "github.com/RichardKnop/machinery/v1/backends/dynamodb"
 	eagerbackend "github.com/RichardKnop/machinery/v1/backends/eager"
 	nullbackend "github.com/RichardKnop/machinery/v1/backends/null"
 	backendiface "github.com/RichardKnop/machinery/v1/backends/iface"
@@ -63,20 +61,6 @@ func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
 
 	if strings.HasPrefix(cnf.Broker, "eager") {
 		return eagerbroker.New(), nil
-	}
-
-	if _, ok := os.LookupEnv("DISABLE_STRICT_SQS_CHECK"); ok {
-		//disable SQS name check, so that users can use this with local simulated SQS
-		//where sql broker url might not start with https://sqs
-
-		//even when disabling strict SQS naming check, make sure its still a valid http URL
-		if strings.HasPrefix(cnf.Broker, "https://") || strings.HasPrefix(cnf.Broker, "http://") {
-			return sqsbroker.New(cnf), nil
-		}
-	} else {
-		if strings.HasPrefix(cnf.Broker, "https://sqs") {
-			return sqsbroker.New(cnf), nil
-		}
 	}
 
 
@@ -133,9 +117,6 @@ func BackendFactory(cnf *config.Config) (backendiface.Backend, error) {
 		return nullbackend.New(), nil
 	}
 
-	if strings.HasPrefix(cnf.ResultBackend, "https://dynamodb") {
-		return dynamobackend.New(cnf), nil
-	}
 
 	return nil, fmt.Errorf("Factory failed with result backend: %v", cnf.ResultBackend)
 }
