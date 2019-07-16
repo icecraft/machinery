@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"cloud.google.com/go/pubsub"
 )
 
 const (
@@ -42,15 +40,15 @@ var (
 
 // Config holds all configuration for our program
 type Config struct {
-	Broker          string           `yaml:"broker" envconfig:"BROKER"`
-	DefaultQueue    string           `yaml:"default_queue" envconfig:"DEFAULT_QUEUE"`
-	ResultBackend   string           `yaml:"result_backend" envconfig:"RESULT_BACKEND"`
-	ResultsExpireIn int              `yaml:"results_expire_in" envconfig:"RESULTS_EXPIRE_IN"`
-	AMQP            *AMQPConfig      `yaml:"amqp"`
-	Redis           *RedisConfig     `yaml:"redis"`
+	Broker          string       `yaml:"broker" envconfig:"BROKER"`
+	DefaultQueue    string       `yaml:"default_queue" envconfig:"DEFAULT_QUEUE"`
+	ResultBackend   string       `yaml:"result_backend" envconfig:"RESULT_BACKEND"`
+	ResultsExpireIn int          `yaml:"results_expire_in" envconfig:"RESULTS_EXPIRE_IN"`
+	AMQP            *AMQPConfig  `yaml:"amqp"`
+	Redis           *RedisConfig `yaml:"redis"`
 	TLSConfig       *tls.Config
 	// NoUnixSignals - when set disables signal handling in machinery
-	NoUnixSignals bool            `yaml:"no_unix_signals" envconfig:"NO_UNIX_SIGNALS"`
+	NoUnixSignals bool `yaml:"no_unix_signals" envconfig:"NO_UNIX_SIGNALS"`
 }
 
 // QueueBindingArgs arguments which are used when binding to the exchange
@@ -65,7 +63,6 @@ type AMQPConfig struct {
 	PrefetchCount    int              `yaml:"prefetch_count" envconfig:"AMQP_PREFETCH_COUNT"`
 	AutoDelete       bool             `yaml:"auto_delete" envconfig:"AMQP_AUTO_DELETE"`
 }
-
 
 // RedisConfig ...
 type RedisConfig struct {
@@ -98,8 +95,6 @@ type RedisConfig struct {
 	// DelayedTasksPollPeriod specifies the period in milliseconds when polling redis for delayed tasks
 	DelayedTasksPollPeriod int `yaml:"delayed_tasks_poll_period" envconfig:"REDIS_DELAYED_TASKS_POLL_PERIOD"`
 }
-
-
 
 // Decode from yaml to map (any field whose type or pointer-to-type implements
 // envconfig.Decoder can control its own deserialization)
