@@ -343,24 +343,6 @@ func TestBackendFactory(t *testing.T) {
 			fmt.Sprintf("conn = %v, want %v", actual, expected),
 		)
 	}
-
-	// 4) MongoDB backend test
-	cnf = config.Config{
-		ResultBackend:   "mongodb://mongo:27017",
-		ResultsExpireIn: 30,
-	}
-
-	_, err = machinery.BackendFactory(&cnf)
-	if assert.NoError(t, err) {
-		//expected, err := mongobackend.New(&cnf)
-		//if assert.NoError(t, err) {
-		// assert.True(
-		// 	t,
-		// 	reflect.DeepEqual(actual, expected),
-		// 	fmt.Sprintf("conn = %v, want %v", actual, expected),
-		// )
-		//}
-	}
 }
 
 func TestBackendFactoryError(t *testing.T) {
