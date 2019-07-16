@@ -4,10 +4,8 @@ import (
 	"errors"
 	"fmt"
 	neturl "net/url"
-	"os"
 	"strconv"
 	"strings"
-
 	"github.com/RichardKnop/machinery/v1/config"
 
 	amqpbroker "github.com/RichardKnop/machinery/v1/brokers/amqp"
