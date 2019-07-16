@@ -41,9 +41,6 @@ var (
 			ConnectTimeout:         15,
 			DelayedTasksPollPeriod: 20,
 		},
-		GCPPubSub: &GCPPubSubConfig{
-			Client: nil,
-		},
 	}
 
 	reloadDelay = time.Second * 10
@@ -58,7 +55,6 @@ type Config struct {
 	AMQP            *AMQPConfig      `yaml:"amqp"`
 	SQS             *SQSConfig       `yaml:"sqs"`
 	Redis           *RedisConfig     `yaml:"redis"`
-	GCPPubSub       *GCPPubSubConfig `yaml:"-" ignored:"true"`
 	TLSConfig       *tls.Config
 	// NoUnixSignals - when set disables signal handling in machinery
 	NoUnixSignals bool            `yaml:"no_unix_signals" envconfig:"NO_UNIX_SIGNALS"`
@@ -126,11 +122,6 @@ type RedisConfig struct {
 	DelayedTasksPollPeriod int `yaml:"delayed_tasks_poll_period" envconfig:"REDIS_DELAYED_TASKS_POLL_PERIOD"`
 }
 
-// GCPPubSubConfig wraps GCP PubSub related configuration
-type GCPPubSubConfig struct {
-	Client       *pubsub.Client
-	MaxExtension time.Duration
-}
 
 
 // Decode from yaml to map (any field whose type or pointer-to-type implements
