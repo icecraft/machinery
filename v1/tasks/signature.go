@@ -43,20 +43,21 @@ func (h Headers) ForeachKey(handler func(key, val string) error) error {
 
 // Signature represents a single task invocation
 type Signature struct {
-	UUID           string
-	Name           string
-	RoutingKey     string
-	ETA            *time.Time
-	GroupUUID      string
-	GroupTaskCount int
-	Args           []Arg
-	Headers        Headers
-	Immutable      bool
-	RetryCount     int
-	RetryTimeout   int
-	OnSuccess      []*Signature
-	OnError        []*Signature
-	ChordCallback  *Signature
+	UUID                 string
+	Name                 string
+	RoutingKey           string
+	ETA                  *time.Time
+	BatchProcessId       string // add by xr, 用于跟踪某个批处理任务的标志符
+	GroupUUID            string
+	GroupTaskCount       int
+	Args                 []Arg
+	Headers              Headers
+	Immutable            bool
+	RetryCount           int
+	RetryTimeout         int
+	OnSuccess            []*Signature
+	OnError              []*Signature
+	ChordCallback        *Signature
 	BrokerMessageGroupId string
 }
 
