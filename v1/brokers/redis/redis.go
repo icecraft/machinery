@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +20,47 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
-var redisDelayedTasksKey = "delayed_tasks"
+var (
+	redisDelayedTasksKey = "delayed_tasks"
+	luaScriptContent     = `
+		-- 约定：返回 0 代表没有取到值。如需修改此值，可能需要同步修改程序中部分逻辑。 0 并不是一个很可靠的标志, 但是在本框架的应用场景下已经能满足需求了
+		-- 从 meta queue 取 10 个队列名字
+		redis.replicate_commands() -- 保证在 master-slave redis 架构中能正常运行
+		local metaqueue_name = KEYS[1]
+		for first=10,1,-1 do
+			local queues = redis.call('SRANDMEMBER', metaqueue_name, 1)
+
+			if #queues == 0 then
+				return 0
+			end
+
+			local queue = queues[1]
+			-- 循环读取取出的队列名字, 依次读取里面的内容,读取到内容就返回。如果所有队列都是空的则返回 0
+			local queue_existed = redis.call('exists', queue)
+
+			if queue_existed == 1 then
+				local ret = redis.call('RPOP', queue)
+				return ret
+			end
+
+			-- 更改某个队列读取不到的次数, 超过一定次数就从 metaqueue 中删除掉
+			local queue_not_exists_key = 'queue:notexists:'..queue
+			redis.call('INCR', queue_not_exists_key)
+			redis.call('EXPIRE', queue_not_exists_key, 3600)
+
+			local queue_not_exists_count = redis.call('GET', queue_not_exists_key)
+			if tonumber(queue_not_exists_count) > 60 then
+				redis.call('SMOVE', metaqueue_name, 'task:queue:history:collections', queue)
+				redis.call('DEL', queue_not_exists_key)
+			end
+		end
+		return 0
+		`
+	luaScript          *redis.Script
+	ErrNoLuaScript     = errors.New("redigo, machinery: NO LUA SCRIPT FOUND")
+	NilLuaResult       = "0" // 如需修改此值，需要同步修改 lua script
+	ErrEmptyRoutingKey = errors.New("routing key should not been empty!")
+)
 
 // Broker represents a Redis broker
 type Broker struct {
@@ -92,12 +134,11 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 				close(deliveries)
 				return
 			case <-pool:
-				task, _ := b.nextTask(getQueue(b.GetConfig(), taskProcessor))
+				task, _ := b.retryToGetNextTask()
 				//TODO: should this error be ignored?
 				if len(task) > 0 {
 					deliveries <- task
 				}
-
 				pool <- struct{}{}
 			}
 		}
@@ -160,7 +201,10 @@ func (b *Broker) StopConsuming() {
 // Publish places a new message on the default queue
 func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error {
 	// Adjust routing key (this decides which queue the message will be published to)
-	b.Broker.AdjustRoutingKey(signature)
+	// 如果 routeingKey 为空则直接返回错误
+	if signature.RoutingKey == "" {
+		return ErrEmptyRoutingKey
+	}
 
 	msg, err := json.Marshal(signature)
 	if err != nil {
@@ -182,8 +226,16 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 		}
 	}
 
-	_, err = conn.Do("RPUSH", signature.RoutingKey, msg)
-	return err
+	// 约定使用 defaultQueue 做为数据交互！
+	if _, err := conn.Do("SADD", b.GetConfig().DefaultQueue, signature.RoutingKey); err != nil {
+		return err
+	}
+
+	if _, err := conn.Do("RPUSH", signature.RoutingKey, msg); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // GetPendingTasks returns a slice of task signatures waiting in the queue
@@ -274,10 +326,7 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 	// If the task is not registered, we requeue it,
 	// there might be different workers for processing specific tasks
 	if !b.IsTaskRegistered(signature.Name) {
-		conn := b.open()
-		defer conn.Close()
-
-		conn.Do("RPUSH", getQueue(b.GetConfig(), taskProcessor), delivery)
+		// 直接返回, 不再 reenqueue message
 		return nil
 	}
 
@@ -287,24 +336,60 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 }
 
 // nextTask pops next available task from the default queue
-func (b *Broker) nextTask(queue string) (result []byte, err error) {
+func (b *Broker) nextTask() ([]byte, error) {
 	conn := b.open()
 	defer conn.Close()
 
-	items, err := redis.ByteSlices(conn.Do("BLPOP", queue, 1000))
+	err := luaScript.SendHash(conn, b.GetConfig().DefaultQueue)
 	if err != nil {
+		log.ERROR.Printf("Failed to sendhash to redis, Reason: %s\n", err.Error())
 		return []byte{}, err
 	}
 
-	// items[0] - the name of the key where an element was popped
-	// items[1] - the value of the popped element
-	if len(items) != 2 {
+	err = conn.Flush()
+	if err != nil {
+		log.ERROR.Printf("redis conn flush error, Reason: %s\n", err.Error())
+		return []byte{}, err
+	}
+
+	result, err := conn.Receive()
+	if err != nil {
+		if strings.Contains(err.Error(), "NOSCRIPT") {
+			return []byte{}, ErrNoLuaScript
+		}
+		return []byte{}, err
+	}
+
+	if fmt.Sprintf("%v", result) == NilLuaResult {
 		return []byte{}, redis.ErrNil
 	}
 
-	result = items[1]
+	//需要尝试转化为 byte array
+	switch v := result.(type) {
+	case []uint8:
+		return []byte(result.([]uint8)), nil
+	default:
+		log.ERROR.Printf("UNSupported return type %v\n", v)
+		return []byte{}, nil
+	}
+}
 
-	return result, nil
+func (b *Broker) retryToGetNextTask() ([]byte, error) {
+	result, err := b.nextTask()
+	if err == nil {
+		return result, nil
+	} else if err == redis.ErrNil {
+		return []byte{}, redis.ErrNil
+	} else if err == ErrNoLuaScript {
+		conn := b.pool.Get()
+		defer conn.Close()
+		log.INFO.Printf("Will reload the lua script to redis\n")
+		loadLuaScript(conn)
+		return b.nextTask()
+	} else {
+		log.ERROR.Printf("Get task error, Reason: %s\n", err.Error())
+		return []byte{}, redis.ErrNil
+	}
 }
 
 // nextDelayedTask pops a value from the ZSET key using WATCH/MULTI/EXEC commands.
@@ -385,15 +470,19 @@ func (b *Broker) open() redis.Conn {
 	b.redisOnce.Do(func() {
 		b.pool = b.NewPool(b.socketPath, b.host, b.password, b.db, b.GetConfig().Redis, b.GetConfig().TLSConfig)
 		b.redsync = redsync.New([]redsync.Pool{b.pool})
+		// add by icecraft, load the redis lua script
+		conn := b.pool.Get()
+		defer conn.Close()
+		log.INFO.Printf("Will load the lua script to redis\n")
+		loadLuaScript(conn)
 	})
 
 	return b.pool.Get()
 }
 
-func getQueue(config *config.Config, taskProcessor iface.TaskProcessor) string {
-	customQueue := taskProcessor.CustomQueue()
-	if customQueue == "" {
-		return config.DefaultQueue
+func loadLuaScript(conn redis.Conn) {
+	luaScript = redis.NewScript(1, luaScriptContent)
+	if err := luaScript.Load(conn); err != nil {
+		log.FATAL.Printf(err.Error())
 	}
-	return customQueue
 }
