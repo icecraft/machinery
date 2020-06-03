@@ -49,7 +49,7 @@ var (
 			redis.call('EXPIRE', queue_not_exists_key, 3600)
 
 			local queue_not_exists_count = redis.call('GET', queue_not_exists_key)
-			if tonumber(queue_not_exists_count) > 60 then
+			if tonumber(queue_not_exists_count) > 600 then
 				redis.call('SMOVE', metaqueue_name, 'task:queue:history:collections', queue)
 				redis.call('DEL', queue_not_exists_key)
 			end
