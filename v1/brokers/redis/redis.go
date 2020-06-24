@@ -27,35 +27,41 @@ var (
 		-- 从 meta queue 取 10 个队列名字
 		redis.replicate_commands() -- 保证在 master-slave redis 架构中能正常运行
 		local metaqueue_name = KEYS[1]
+		local client_time = ARGV[1]
 		for first=10,1,-1 do
 			local queues = redis.call('SRANDMEMBER', metaqueue_name, 1)
-
 			if #queues == 0 then
 				return 0
 			end
 
 			local queue = queues[1]
+			local queue_expired_key = 'queue:expired:'..queue
+
 			-- 循环读取取出的队列名字, 依次读取里面的内容,读取到内容就返回。如果所有队列都是空的则返回 0
-			local queue_existed = redis.call('exists', queue)
+			local queue_existed = redis.call('EXISTS', queue)
 
 			if queue_existed == 1 then
+				redis.call('DEL', queue_expired_key)
 				local ret = redis.call('RPOP', queue)
 				return ret
 			end
 
 			-- 更改某个队列读取不到的次数, 超过一定次数就从 metaqueue 中删除掉
-			local queue_not_exists_key = 'queue:notexists:'..queue
-			redis.call('INCR', queue_not_exists_key)
-			redis.call('EXPIRE', queue_not_exists_key, 3600)
-
-			local queue_not_exists_count = redis.call('GET', queue_not_exists_key)
-			if tonumber(queue_not_exists_count) > 600 then
-				redis.call('SMOVE', metaqueue_name, 'task:queue:history:collections', queue)
-				redis.call('DEL', queue_not_exists_key)
+			local queue_expired_key_existed = redis.call('EXISTS', queue_expired_key)
+			if queue_expired_key_existed == 1 then
+				local queue_expired_time = redis.call('GET', queue_expired_key)
+				if tonumber(queue_expired_time) > client_time then
+					redis.call('SMOVE', metaqueue_name, 'task:queue:history:collections', queue)
+					redis.call('DEL', queue_expired_key)
+				end
+			else
+				redis.call('SET', queue_expired_key, client_time+15)
+				redis.call('EXPIRE', queue_expired_key, 3600)
 			end
 		end
 		return 0
 		`
+
 	luaScript          *redis.Script
 	ErrNoLuaScript     = errors.New("redigo, machinery: NO LUA SCRIPT FOUND")
 	NilLuaResult       = "0" // 如需修改此值，需要同步修改 lua script
