@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,7 +28,7 @@ var (
 		-- 从 meta queue 取 10 个队列名字
 		redis.replicate_commands() -- 保证在 master-slave redis 架构中能正常运行
 		local metaqueue_name = KEYS[1]
-		local client_time = ARGV[1]
+		local client_time = KEYS[2]
 		for first=10,1,-1 do
 			local queues = redis.call('SRANDMEMBER', metaqueue_name, 1)
 			if #queues == 0 then
@@ -66,7 +67,30 @@ var (
 	ErrNoLuaScript     = errors.New("redigo, machinery: NO LUA SCRIPT FOUND")
 	NilLuaResult       = "0" // 如需修改此值，需要同步修改 lua script
 	ErrEmptyRoutingKey = errors.New("routing key should not been empty!")
+	/*
+			在系统启动时, 计算出当前时间和 redis server 上的时间差。如果 server 时间期间被改过或者在长期运行后
+		redis-server 和服务所在机器存在 累积时间误差则不考虑
+	*/
+	timeDelta           int
+	syncRedisServerTime sync.Once
 )
+
+func getClientTime() int {
+	t := time.Now().Second
+	return t + timeDelta
+}
+
+func syncRedisServerTime(conn redis.Conn) {
+	n, err := conn.Do("TIME")
+	if err != nil {
+		log.Fatal.Printf(err.Error())
+	}
+
+	results, _ := redis.ByteSlices(n, nil)
+	serverTime, _ := strconv.Atoi(strings(results[0]))
+	timeDelta = serverTime - time.Now().Second
+
+}
 
 // Broker represents a Redis broker
 type Broker struct {
@@ -346,7 +370,7 @@ func (b *Broker) nextTask() ([]byte, error) {
 	conn := b.open()
 	defer conn.Close()
 
-	err := luaScript.SendHash(conn, b.GetConfig().DefaultQueue)
+	err := luaScript.SendHash(conn, b.GetConfig().DefaultQueue, getClientTime())
 	if err != nil {
 		log.ERROR.Printf("Failed to sendhash to redis, Reason: %s\n", err.Error())
 		return []byte{}, err
@@ -481,6 +505,7 @@ func (b *Broker) open() redis.Conn {
 		defer conn.Close()
 		log.INFO.Printf("Will load the lua script to redis\n")
 		loadLuaScript(conn)
+		syncRedisServerTime(conn)
 	})
 
 	return b.pool.Get()
