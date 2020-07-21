@@ -51,7 +51,7 @@ var (
 			local queue_expired_key_existed = redis.call('EXISTS', queue_expired_key)
 			if queue_expired_key_existed == 1 then
 				local queue_expired_time = redis.call('GET', queue_expired_key)
-				if tonumber(queue_expired_time) > client_time then
+				if client_time > tonumber(queue_expired_time) then
 					redis.call('SMOVE', metaqueue_name, 'task:queue:history:collections', queue)
 					redis.call('DEL', queue_expired_key)
 				end
