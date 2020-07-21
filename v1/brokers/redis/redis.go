@@ -256,11 +256,11 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 	}
 
 	// 约定使用 defaultQueue 做为数据交互！
-	if _, err := conn.Do("SADD", b.GetConfig().DefaultQueue, signature.RoutingKey); err != nil {
+	if _, err := conn.Do("RPUSH", signature.RoutingKey, msg); err != nil {
 		return err
 	}
 
-	if _, err := conn.Do("RPUSH", signature.RoutingKey, msg); err != nil {
+	if _, err := conn.Do("SADD", b.GetConfig().DefaultQueue, signature.RoutingKey); err != nil {
 		return err
 	}
 
