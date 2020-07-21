@@ -56,7 +56,7 @@ var (
 					redis.call('DEL', queue_expired_key)
 				end
 			else
-				redis.call('SET', queue_expired_key, client_time+15)
+				redis.call('SET', queue_expired_key, client_time+900)
 				redis.call('EXPIRE', queue_expired_key, 3600)
 			end
 		end
