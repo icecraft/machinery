@@ -29,6 +29,20 @@ var (
 		redis.replicate_commands() -- 保证在 master-slave redis 架构中能正常运行
 		local metaqueue_name = KEYS[1]
 		local client_time = tonumber(KEYS[2])
+
+		local max_client_time_key = 'max:machinery_tasks:client_req_time'
+		local max_client_time_key_existed = redis.call('EXISTS', max_client_time_key)
+		if max_client_time_key_existed == 1 then
+			local max_client_time_key_value = redis.call('GET', max_client_time_key)
+			if client_time >= tonumber(max_client_time_key_value) then
+				redis.call('SET', max_client_time_key, client_time)
+			elseif tonumber(max_client_time_key_value) > client_time+60 then
+				return 0
+			end
+		else
+			redis.call('SET', max_client_time_key, client_time)
+		end
+
 		for first=10,1,-1 do
 			local queues = redis.call('SRANDMEMBER', metaqueue_name, 1)
 			if #queues == 0 then
