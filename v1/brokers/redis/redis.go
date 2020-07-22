@@ -54,10 +54,12 @@ var (
 				if client_time > tonumber(queue_expired_time) then
 					redis.call('SMOVE', metaqueue_name, 'task:queue:history:collections', queue)
 					redis.call('DEL', queue_expired_key)
+				else
+					return 0
 				end
 			else
 				redis.call('SET', queue_expired_key, client_time+900)
-				redis.call('EXPIRE', queue_expired_key, 3600)
+				redis.call('EXPIRE', queue_expired_key, 86400)
 			end
 		end
 		return 0
