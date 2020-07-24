@@ -28,20 +28,6 @@ var (
 		-- 从 meta queue 取 10 个队列名字
 		redis.replicate_commands() -- 保证在 master-slave redis 架构中能正常运行
 		local metaqueue_name = KEYS[1]
-		local client_time = tonumber(KEYS[2])
-
-		local max_client_time_key = 'max:machinery_tasks:client_req_time'
-		local max_client_time_key_existed = redis.call('EXISTS', max_client_time_key)
-		if max_client_time_key_existed == 1 then
-			local max_client_time_key_value = redis.call('GET', max_client_time_key)
-			if client_time >= tonumber(max_client_time_key_value) then
-				redis.call('SET', max_client_time_key, client_time)
-			elseif tonumber(max_client_time_key_value) > client_time+60 then
-				return 0
-			end
-		else
-			redis.call('SET', max_client_time_key, client_time)
-		end
 
 		for first=10,1,-1 do
 			local queues = redis.call('SRANDMEMBER', metaqueue_name, 1)
@@ -64,16 +50,16 @@ var (
 			-- 更改某个队列读取不到的次数, 超过一定次数就从 metaqueue 中删除掉
 			local queue_expired_key_existed = redis.call('EXISTS', queue_expired_key)
 			if queue_expired_key_existed == 1 then
-				local queue_expired_time = redis.call('GET', queue_expired_key)
-				if client_time > tonumber(queue_expired_time) then
+				local queue_expired_time = redis.call('TTL', queue_expired_key)
+				if 3300 > tonumber(queue_expired_time) then
 					redis.call('SMOVE', metaqueue_name, 'task:queue:history:collections', queue)
 					redis.call('DEL', queue_expired_key)
 				else
 					return 0
 				end
 			else
-				redis.call('SET', queue_expired_key, client_time+900)
-				redis.call('EXPIRE', queue_expired_key, 86400)
+				redis.call('SET', queue_expired_key, 1)
+				redis.call('EXPIRE', queue_expired_key, 3600)
 			end
 		end
 		return 0
@@ -385,7 +371,7 @@ func (b *Broker) nextTask() ([]byte, error) {
 	conn := b.open()
 	defer conn.Close()
 
-	err := luaScript.SendHash(conn, b.GetConfig().DefaultQueue, getClientTime())
+	err := luaScript.SendHash(conn, b.GetConfig().DefaultQueue)
 	if err != nil {
 		log.ERROR.Printf("Failed to sendhash to redis, Reason: %s\n", err.Error())
 		return []byte{}, err
@@ -527,7 +513,7 @@ func (b *Broker) open() redis.Conn {
 }
 
 func loadLuaScript(conn redis.Conn) {
-	luaScript = redis.NewScript(2, luaScriptContent)
+	luaScript = redis.NewScript(1, luaScriptContent)
 	if err := luaScript.Load(conn); err != nil {
 		log.FATAL.Printf(err.Error())
 	}
